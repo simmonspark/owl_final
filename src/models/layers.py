@@ -5,6 +5,7 @@ import yaml
 from src.dataset import get_dataloaders
 from tqdm import tqdm
 from PIL import Image
+import wandb
 
 tmp = ['banner', 'bench', 'fence', 'flame', 'food_truck', 'garbage_bag',
        'park_headstone', 'park_info', 'park_pot', 'pet', 'rest_area',
@@ -18,11 +19,23 @@ def get_training_config():
 
 
 def clip_train():
+    wandb.init(project="owl_vit", name="clip_train_run")
     from transformers import OwlViTConfig
     from transformers import AutoProcessor
+    from transformers import OwlViTForObjectDetection as hf_model
     config_dict = OwlViTConfig.get_config_dict("google/owlvit-base-patch32")
     config = OwlViTConfig(config_dict[0])
     model = OwlViTModel(config)
+
+    h_model = hf_model.from_pretrained("google/owlvit-base-patch32")
+    h_model = h_model.owlvit
+    model_state_dict = {}
+    for key, value in h_model.state_dict().items():
+        new_key = key.replace('owlvit.', '')
+        model_state_dict[new_key] = value
+    model.load_state_dict(model_state_dict)
+
+
     training_cfg = get_training_config()
     train_dataloader, test_dataloader, scales, labelmap = get_dataloaders()
     optimizer = torch.optim.AdamW(
@@ -42,11 +55,19 @@ def clip_train():
     model.to(device)
     patient = 3
     best = torch.inf
+    _ = 0
+
+    wandb.config.update({
+        "learning_rate": float(training_cfg["learning_rate"]),
+        "weight_decay": training_cfg["weight_decay"],
+        "batch_size": train_dataloader.batch_size,
+        "epochs": "infinite_with_patience"
+    })
+    global_step = 0
     while True:
         losses = []
-        for i, (image, labels, boxes, metadata) in enumerate(
-                tqdm(train_dataloader, ncols=60)
-        ):
+        progress_bar = tqdm(train_dataloader)
+        for i, (image, labels, boxes, metadata) in enumerate(progress_bar):
             store = 0
             text_token = ids.to(device)
             # logits_per_image : idx[0] : 1,3
@@ -86,7 +107,13 @@ def clip_train():
             loss_img2text.backward()
             optimizer.step()
             store = store + loss_img2text.item()
+            progress_bar.set_postfix({"current loss": loss_img2text.item()})
+            global_step += 1
+            wandb.log({"step_loss": loss_img2text.item(), "step": global_step})
+        torch.save(model.state_dict(), './clip_model.pth')
         losses.append(store)
+        avg_loss = sum(losses) / len(losses)
+        wandb.log({"avg_loss_per_epoch": avg_loss, "step": global_step})
         _ = sum(losses) / len(losses)
         if _ < best:
             best = _
