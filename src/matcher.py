@@ -84,6 +84,28 @@ class HungarianMatcher(torch.nn.Module):
 
     @torch.no_grad()
     def forward(self, outputs, targets):
+        B, C, T = outputs['pred_logits'].shape
+        logit = outputs['pred_logits'][0]
+        class_pred = logit.softmax(dim=-1)
+
+        box_pred = outputs['pred_boxes'][0]
+        target_class = targets[0]['labels']
+        target_box = targets[0]['boxes']
+
+        class_map = -class_pred[:,target_class]
+        box_l2_loss_map = torch.cdist(box_pred, target_box,p=1)
+        giou_map = generalized_box_iou(box_pred, target_box)
+
+        c = (class_map + giou_map + box_l2_loss_map).detach().to('cpu')
+        indices = linear_sum_assignment(c)
+        idx = self._get_src_permutation_idx(torch.tensor([indices]))
+        target_classes = torch.full(size = (B,C), fill_value = self.n_classes, device = targets[0]['labels'].device)
+        _ = targets[0]['labels'][indices[1]]
+        target_classes[idx] = _
+        return target_classes, [indices], idx
+
+    @torch.no_grad()
+    def forward0(self, outputs, targets):
         """Performs the matching
         Params:
             outputs: This is a dict that contains at least these entries:
@@ -155,5 +177,6 @@ class HungarianMatcher(torch.nn.Module):
             device=outputs["pred_logits"].device,
         )
         target_classes[idx] = target_classes_o
-
+        # idx : B T
+        # indices : T C
         return target_classes, indices, idx

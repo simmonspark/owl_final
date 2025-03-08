@@ -54,26 +54,22 @@ class PushPullLoss(torch.nn.Module):
             [t["boxes"][i] for t, (_, i) in zip(targets, indices)], dim=0
         )
 
-        loss_bbox = torch.nn.functional.l1_loss(
+        loss_bbox = torch.nn.functional.mse_loss(
             src_boxes, target_boxes, reduction="none"
         )
 
-        metadata = {}
-
         loss_bbox = loss_bbox.sum() / num_boxes
-        metadata["loss_bbox"] = loss_bbox.tolist()
-
         loss_giou = 1 - torch.diag(generalized_box_iou(src_boxes, target_boxes))
         loss_giou = loss_giou.sum() / num_boxes
 
-        return loss_bbox, loss_giou
+        return loss_bbox*1.5, loss_giou*1.5
 
     def forward(
-        self,
-        predicted_classes,
-        target_classes,
-        predicted_boxes,
-        target_boxes,
+            self,
+            predicted_classes,
+            target_classes,
+            predicted_boxes,
+            target_boxes,
     ):
         # Format to detr style
         in_preds = {

@@ -28,43 +28,6 @@ from torchvision.utils import draw_bounding_boxes
 from torchvision.io import read_image
 
 
-def draw_box_on_image(
-        cls,
-        image: str or torch.Tensor,  # cv2 image
-        boxes_batch: torch.Tensor,  # [batch_size, num_boxes, 5] with [x_min, y_min, x_max, y_max, score]
-        labels_batch: list = None,  # Optional
-        color=(0, 255, 0),
-):
-    if isinstance(image, str):
-        image = read_image(image)
-
-    # boxes_batch가 2D면 3D로 변환
-    if boxes_batch.dim() == 2:
-        boxes_batch = boxes_batch.unsqueeze(0)
-
-    # NMS 적용 및 박스 그리기
-    if labels_batch is None:
-        for _boxes in boxes_batch:
-            if not len(_boxes):
-                continue
-            # NMS: 박스 좌표([:4])와 점수([4]) 분리
-            keep = nms(_boxes[:, :4], _boxes[:, 4], iou_threshold=0.5)
-            filtered_boxes = _boxes[keep, :4]  # 점수 제외
-            image = draw_bounding_boxes(image, filtered_boxes, width=2, colors=color)
-    else:
-        for _boxes, _labels in zip(boxes_batch, labels_batch):
-            if not len(_boxes):
-                continue
-            # NMS: 박스 좌표([:4])와 점수([4]) 분리
-            keep = nms(_boxes[:, :4], _boxes[:, 4], iou_threshold=0.5)
-            filtered_boxes = _boxes[keep, :4]  # 점수 제외
-            filtered_labels = _labels[keep]
-            image = draw_bounding_boxes(
-                image, filtered_boxes, labels=[str(l.item()) for l in filtered_labels],
-                width=2, colors=color
-            )
-    return image
-
 def get_training_config():
     with open("config.yaml", "r") as stream:
         data = yaml.safe_load(stream)

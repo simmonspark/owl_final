@@ -171,7 +171,9 @@ def load_model(labelmap, device):
 
     for name, parameter in patched_model.named_parameters():
         conditions = [
-            "layers.11" in name,
+            'ml' in name,
+            "em" in name,
+            "layers" in name,
             "box" in name,
             "post_layernorm" in name,
             "class_predictor" in name,
@@ -179,6 +181,7 @@ def load_model(labelmap, device):
         ]
         if any(conditions):
             continue
+
 
         parameter.requires_grad = False
 
