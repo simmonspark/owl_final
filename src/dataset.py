@@ -9,9 +9,9 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from transformers import OwlViTProcessor
 
-TRAIN_ANNOTATIONS_FILE = "./data/train.json"
-TEST_ANNOTATIONS_FILE = "./data/test.json"
-LABELMAP_FILE = "./data/labelmap.json"
+TRAIN_ANNOTATIONS_FILE = "/media/sien/media/code/owl_final/data/train.json"
+TEST_ANNOTATIONS_FILE = "/media/sien/media/code/owl_final/data/test.json"
+LABELMAP_FILE = "/media/sien/media/code/owl_final/data/labelmap.json"
 
 
 
@@ -69,6 +69,7 @@ class OwlDataset(Dataset):
 def get_dataloaders(
     train_annotations_file=TRAIN_ANNOTATIONS_FILE,
     test_annotations_file=TEST_ANNOTATIONS_FILE,
+    batch_size=1,
 ):
     image_processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
 
@@ -91,10 +92,10 @@ def get_dataloaders(
 
     train_labelcounts = {}
     train_dataloader = DataLoader(
-        train_dataset, batch_size=1, shuffle=True, num_workers=10, prefetch_factor=100
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=10, prefetch_factor=100
     )
     test_dataloader = DataLoader(
-        test_dataset, batch_size=1, shuffle=False, num_workers=10, prefetch_factor=100
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=10, prefetch_factor=100
     )
 
     return train_dataloader, test_dataloader, scales, labelmap
