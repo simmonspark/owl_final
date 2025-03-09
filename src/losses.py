@@ -10,7 +10,7 @@ class PushPullLoss(torch.nn.Module):
     def __init__(self, n_classes, scales):
         super().__init__()
         self.matcher = HungarianMatcher(n_classes)
-        self.class_criterion = torch.nn.BCELoss(reduction="none", weight=scales)
+        self.class_criterion = torch.nn.BCEWithLogitsLoss(reduction="none", weight=scales)# BCELoss  BCEWithLogitsLoss
         self.background_label = n_classes
 
     def class_loss(self, outputs, target_classes):
@@ -31,9 +31,9 @@ class PushPullLoss(torch.nn.Module):
         pos_targets = torch.nn.functional.one_hot(target_classes, self.background_label)
         neg_targets = torch.zeros(bg_logits.shape).to(bg_logits.device)
 
-        pos_loss = self.class_criterion(pred_logits, pos_targets.float())
+        pos_loss = self.class_criterion(pred_logits, pos_targets.float())#<<<<
         neg_loss = self.class_criterion(bg_logits, neg_targets)
-
+        #3,18  573,18
         pos_loss = (torch.pow(1 - torch.exp(-pos_loss), 2) * pos_loss).sum(dim=1).mean()
         neg_loss = (torch.pow(1 - torch.exp(-neg_loss), 2) * neg_loss).sum(dim=1).mean()
 

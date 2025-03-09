@@ -6,11 +6,12 @@ from src.dataset import get_dataloaders
 from tqdm import tqdm
 from PIL import Image
 import wandb
-
+from transformers.image_transforms import center_to_corners_format
 tmp = ['banner', 'bench', 'fence', 'flame', 'food_truck', 'garbage_bag',
        'park_headstone', 'park_info', 'park_pot', 'pet', 'rest_area',
        'sit_board', 'smoke', 'street_lamp', 'street_vendor', 'tent',
        'toilet', 'trash_can']
+
 
 def get_training_config():
     with open("/media/sien/media/code/owl_final/config.yaml", "r") as stream:
@@ -34,7 +35,6 @@ def clip_train():
         new_key = key.replace('owlvit.', '')
         model_state_dict[new_key] = value
     model.load_state_dict(model_state_dict)
-
 
     training_cfg = get_training_config()
     train_dataloader, test_dataloader, scales, labelmap = get_dataloaders()
@@ -117,12 +117,10 @@ def clip_train():
         _ = sum(losses) / len(losses)
         if _ < best:
             best = _
-        else :
+        else:
             patient -= 1
         if patient == 0:
-            torch.save(model.state_dict(),'./clip_model.pth')
-
-
+            torch.save(model.state_dict(), './clip_model.pth')
 
 
 class OwlViTConfig:
@@ -406,6 +404,7 @@ class OwlViTModel(nn.Module):
         self.visual_projection = nn.Linear(self.vision_embed_dim, self.projection_dim, bias=False)
         self.text_projection = nn.Linear(self.text_embed_dim, self.projection_dim, bias=False)
         self.logit_scale = nn.Parameter(torch.tensor(config.logit_scale_init_value))
+        self.load_state_dict(torch.load('/media/sien/media/code/owl_final/src/model/clip_model.pth'),strict=True)
 
     def forward(self, input_ids=None, pixel_values=None, loss=False):
         # idx[0] : last_hidden_state : 1, 577, 768
@@ -427,7 +426,6 @@ class OwlViTModel(nn.Module):
         logits_per_text = torch.matmul(text_embeds_norm, image_embeds.t()) * logit_scale
         logits_per_image = logits_per_text.t()
 
-
         text_embeds = text_embeds_norm
 
         # return
@@ -443,6 +441,7 @@ class OwlViTModel(nn.Module):
         # idx[1] : pooler_output : 1,768
         # clip_loss : idx[6] : 그냥 contrastive에서만 쓰임
         return (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
+
 
 class OwlViTBoxPredictionHead(nn.Module):
     def __init__(self, config: OwlViTConfig, out_dim: int = 4):
@@ -462,6 +461,7 @@ class OwlViTBoxPredictionHead(nn.Module):
         output = self.dense2(output)
         return output
 
+
 class OwlViTClassPredictionHead(nn.Module):
     def __init__(self, config: OwlViTConfig):
         super().__init__()
@@ -474,34 +474,69 @@ class OwlViTClassPredictionHead(nn.Module):
         self.logit_scale = nn.Linear(self.query_dim, 1)
         self.elu = nn.ELU()
 
-    def forward(self,image_embeds,query_embeds):
+    def forward(self, image_embeds, query_embeds):
+        # image_embeds : B, T, C | query_embeds : B, T, C | C~768
+        # image_class_embeds : B, T, C' | C'~512
         image_class_embeds = self.dense0(image_embeds)
         image_class_embeds = image_class_embeds / (torch.linalg.norm(image_class_embeds, dim=-1, keepdim=True) + 1e-6)
         query_embeds = query_embeds / (torch.linalg.norm(query_embeds, dim=-1, keepdim=True) + 1e-6)
-
+        # img2text
         pred_logits = torch.einsum("...pd,...qd->...pq", image_class_embeds, query_embeds)
 
         logit_shift = self.logit_shift(image_embeds)
         logit_scale = self.logit_scale(image_embeds)
         logit_scale = self.elu(logit_scale) + 1
         pred_logits = (pred_logits + logit_shift) * logit_scale
-        #idx[0] : 1, 576,3
-        #idx[1] : 1, 576, 512
+        # idx[0] : 1, 576,3
+        # idx[1] : 1, 576, 512
         return (pred_logits, image_class_embeds)
 
-class OwlViTForObjectDetection(nn.Module):
-    def __init__(self, config):
-        super(OwlViTForObjectDetection, self).__init__()
-        self.config = config
-        self.owlvit = OwlViTModel(config)
-        self.class_head = OwlViTClassPredictionHead(config)
-        self.box_head = OwlViTBoxPredictionHead(config)
 
-        self.layer_norm = nn.LayerNorm(config.vision_config.hidden_size, eps=config.vision_config.layer_norm_eps)
+class OwlViTForObjectDetection(nn.Module):
+    def __init__(self):
+        super(OwlViTForObjectDetection, self).__init__()
+        from transformers import AutoProcessor, OwlViTConfig
+        config_dict = OwlViTConfig.get_config_dict("google/owlvit-base-patch32")
+        config = OwlViTConfig(config_dict[0])
+        self.config = config
+        self.owlvit = OwlViTModel(self.config)
+        self.class_head = OwlViTClassPredictionHead(self.config)
+        self.box_head = OwlViTBoxPredictionHead(self.config)
+
+        self.layer_norm = nn.LayerNorm(self.config.vision_config.hidden_size,
+                                       eps=self.config.vision_config.layer_norm_eps)
         self.sigmoid = nn.Sigmoid()
 
-        self.sqrt_num_patches = config.vision_config.image_size // config.vision_config.patch_size
+        self.sqrt_num_patches = self.config.vision_config.image_size // self.config.vision_config.patch_size
         self.box_bias = self.compute_box_bias(self.sqrt_num_patches)
+
+        from transformers import OwlViTForObjectDetection as hf_model
+        _processor = AutoProcessor.from_pretrained("google/owlvit-base-patch32")
+        hf_model = hf_model.from_pretrained("google/owlvit-base-patch32")
+        state_hf = hf_model.state_dict()
+        self.load_state_dict(state_hf, strict=True)
+        print('match')
+        inputs = _processor(
+            text=tmp,
+            images=Image.new("RGB", (224, 224)),
+            return_tensors="pt",
+        )
+        with torch.no_grad():
+            queries = self.owlvit.text_model(inputs['input_ids'])
+        self.queries = torch.nn.Parameter(queries[1])
+        # --
+        for name, parameter in self.named_parameters():
+            conditions = [
+                "layers.11" in name,
+                "box_head" in name,
+                "post_layernorm" in name,
+                "class_head" in name,
+                "queries" in name,
+            ]
+            if any(conditions):
+                continue
+
+            parameter.requires_grad = False
 
     @staticmethod
     def normalize_grid_corner_coordinates(num_patches: int) -> torch.Tensor:
@@ -559,43 +594,42 @@ class OwlViTForObjectDetection(nn.Module):
         box_bias = self.box_bias.to(feature_map.device)
         pred_boxes += box_bias
         pred_boxes = self.sigmoid(pred_boxes)
-        #1,576,4
-        return pred_boxes
+        # 1,576,4
+        return center_to_corners_format(pred_boxes)
 
-    def class_predictor(
-            self,
-            image_feats: torch.FloatTensor,
-            query_embeds=None,
-            query_mask=None,
-    ):
-        #idx[0] : 1, 586,3
-        #idx[1] : 1, 576, 512
-        (pred_logits, image_class_embeds) = self.class_head(image_feats, query_embeds, query_mask)
-        #idx[0] : 1, 586,3
-        #idx[1] : 1, 576, 512
+    def class_predictor(self, image_feats: torch.FloatTensor, query_embeds=None):
+        # idx[0] : 1, 586,3
+        # idx[1] : 1, 576, 512
+        (pred_logits, image_class_embeds) = self.class_head(image_feats, query_embeds)
+        # idx[0] : 1, 586,3
+        # idx[1] : 1, 576, 512
         return (pred_logits, image_class_embeds)
 
-    def image_text_embedder(
-            self,
-            input_ids: torch.Tensor,
-            pixel_values: torch.FloatTensor
-    ) -> Tuple[torch.FloatTensor]:
-
-        #logits_per_image : idx[0] : 1,3
-        #logits_per_text : idx[1] : 3,1
-        #text_embeds : idx[2] : 3,512
-        #image_embeds : idx[3] : 1,512
-        #text_model_output : idx[4] :
-            #idx[0] : last_hidden_state -> shape(3,16,512)
-            #idx[1] : pooled_output -> shape(3,512)
-        #vision_model_output : idx[5] :
-            # idx[0] : last_hidden_state : 1, 577, 768
-            # idx[1] : pooler_output : 1,768
-        outputs = self.owlvit(
-            pixel_values=pixel_values,
-            input_ids=input_ids
-        )
-        image_embeds = self.owlvit.vision_model.post_layernorm(outputs[5][0])
+    def image_text_embedder(self, input_ids, pixel_values):
+        # logits_per_image : idx[0] : 1,3
+        # logits_per_text : idx[1] : 3,1
+        # text_embeds : idx[2] : 3,512
+        # image_embeds : idx[3] : 1,512
+        # text_model_output : idx[4] :
+        # idx[0] : last_hidden_state -> shape(3,16,512)
+        # idx[1] : pooled_output -> shape(3,512)
+        # vision_model_output : idx[5] :
+        # idx[0] : last_hidden_state : 1, 577, 768
+        # idx[1] : pooler_output : 1,768
+        outputs = None
+        if input_ids is not None:
+            outputs = self.owlvit(
+                pixel_values=pixel_values,
+                input_ids=input_ids
+            )
+            image_embeds = self.owlvit.vision_model.post_layernorm(outputs[5][0])
+            text_embeds = outputs[2]
+        elif input_ids is None:
+            img_out = self.owlvit.vision_model(pixel_values=pixel_values)
+            text_embeds = self.queries
+            image_embeds = self.owlvit.vision_model.post_layernorm(img_out[0])
+        else:
+            raise ValueError("토큰 이상")
 
         class_token_out = torch.broadcast_to(image_embeds[:, :1, :], image_embeds[:, :-1].shape)
 
@@ -609,22 +643,85 @@ class OwlViTForObjectDetection(nn.Module):
             image_embeds.shape[-1],
         )
         image_embeds = image_embeds.reshape(new_size)
-        text_embeds = outputs[2]
-        #idx[0] : 3,512
-        #idx[1] : 1,24,24, 768
-        #idx[2] :
-            # logits_per_image : idx[0] : 1,3
-            # logits_per_text : idx[1] : 3,1
-            # text_embeds : idx[2] : 3,512
-            # image_embeds : idx[3] : 1,512
-            # text_model_output : idx[4] :
-                # idx[0] : last_hidden_state -> shape(3,16,512)
-                # idx[1] : pooled_output -> shape(3,512)
-            # vision_model_output : idx[5] :
-                # idx[0] : last_hidden_state : 1, 577, 768
-                # idx[1] : pooler_output : 1,768
+        # idx[0] : 3,512
+        # idx[1] : 1,24,24, 768
+        # idx[2] :
+        # logits_per_image : idx[0] : 1,3
+        # logits_per_text : idx[1] : 3,1
+        # text_embeds : idx[2] : 3,512
+        # image_embeds : idx[3] : 1,512
+        # text_model_output : idx[4] :
+        # idx[0] : last_hidden_state -> shape(3,16,512)
+        # idx[1] : pooled_output -> shape(3,512)
+        # vision_model_output : idx[5] :
+        # idx[0] : last_hidden_state : 1, 577, 768
+        # idx[1] : pooler_output : 1,768
         return (text_embeds, image_embeds, outputs)
+
+    def forward(self, pixel_values, input_ids=None):
+        # idx[0] : 3,512
+        # idx[1] : 1,24,24, 768
+        # idx[2] :
+        # logits_per_image : idx[0] : 1,3
+        # logits_per_text : idx[1] : 3,1
+        # text_embeds : idx[2] : 3,512
+        # image_embeds : idx[3] : 1,512
+        # text_model_output : idx[4] :
+        # idx[0] : last_hidden_state -> shape(3,16,512)
+        # idx[1] : pooled_output -> shape(3,512)
+        # vision_model_output : idx[5] :
+        # idx[0] : last_hidden_state : 1, 577, 768
+        # idx[1] : pooler_output : 1,768
+
+        query_embeds, feature_map, outputs = self.image_text_embedder(
+            input_ids=input_ids,
+            pixel_values=pixel_values
+        )
+
+        batch_size, num_patches, num_patches, hidden_dim = feature_map.shape
+        image_feats = torch.reshape(feature_map, (batch_size, num_patches * num_patches, hidden_dim))
+
+        if input_ids is not None:
+            max_text_queries = input_ids.shape[0] // batch_size
+        else:
+            max_text_queries = self.queries.shape[0] // batch_size
+
+        query_embeds = query_embeds.reshape(batch_size, max_text_queries, query_embeds.shape[-1])
+        # idx[0] : 1, 576,3 << 이거 쓸거임
+        # idx[1] : 1, 576, 512
+        (pred_logits, class_embeds) = self.class_predictor(image_feats, query_embeds)
+        pred_boxes = self.box_predictor(image_feats, feature_map)
+        # idx[0] : image_embeds -> shape(1, 24, 24, 768)
+        # idx[1] : text_embeds -> shape(1,3,512)
+        # idx[2] : pred_boxes -> shape(1,576,4)
+        # idx[3] : logits -> shape(1,576,3)
+        # idx[4] : class_embeds -> shape(1,576,512)
+        # idx[5] : text_model_output
+        # idx[0] : last_hidden_state -> shape(3,16,512)
+        # idx[1] : pooled_output -> shape(3,512)
+        # idx[6] : vision_model_output
+        # idx[0] : last_hidden_state : (1, 577, 768)
+        # idx[1] : pooler_output : (1,768)
+        '''return OwlViTObjectDetectionOutput(
+            image_embeds=feature_map,
+            text_embeds=query_embeds,
+            pred_boxes=pred_boxes,
+            logits=pred_logits,
+            class_embeds=class_embeds,
+            text_model_output=None,
+            vision_model_output=None,
+        )'''
+        return pred_boxes, pred_logits
 
 
 if __name__ == "__main__":
-    clip_train()
+    from transformers import AutoProcessor
+    # clip_train()
+    model = OwlViTForObjectDetection()
+    _processor = AutoProcessor.from_pretrained("google/owlvit-base-patch32")
+    inputs = _processor(
+        text=tmp,
+        images=Image.new("RGB", (224, 224)),
+        return_tensors="pt",
+    )
+    model(input_ids = None, pixel_values = inputs['pixel_values'])

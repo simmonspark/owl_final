@@ -10,8 +10,8 @@ training:
   save_eval_images: True
   use_class_weight: true 
   weight_decay: 0.1  # default
-  confidence_threshold: 0.2  # This can be quite low and still achieve good results
-  iou_threshold: 0.3  # For nms
+  confidence_threshold: 0.01  # This can be quite low and still achieve good results
+  iou_threshold: 0.45  # For nms
   # NOTE: Use these values for benchmarking to stay consistent with YOLO, fasterRCNN, SSD, DETR,... etc
   #   confidence_threshold: 0.01  
   #   iou_threshold: 0.45

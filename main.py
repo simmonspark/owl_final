@@ -1,7 +1,7 @@
 import json
 import os
 import shutil
-
+from src.model.owl import OwlViTForObjectDetection
 import torch
 import yaml
 from torch.onnx.symbolic_opset9 import unsqueeze
@@ -48,7 +48,8 @@ if __name__ == "__main__":
     train_dataloader, test_dataloader, scales, labelmap = get_dataloaders()
 
     model = load_model(labelmap, device)
-
+    #model = OwlViTForObjectDetection()
+    #model.to(device)
     postprocess = PostProcess(
         confidence_threshold=training_cfg["confidence_threshold"],
         iou_threshold=training_cfg["iou_threshold"],
@@ -70,7 +71,7 @@ if __name__ == "__main__":
     model.train()
     classMAPs = {v: [] for v in list(labelmap.values())}
     for epoch in range(training_cfg["n_epochs"]):
-        if training_cfg["save_eval_images"]:
+        '''if training_cfg["save_eval_images"]:
             os.makedirs(f"debug/{epoch}", exist_ok=True)
 
         # Train loop
@@ -87,7 +88,8 @@ if __name__ == "__main__":
             boxes = coco_to_model_input(boxes, metadata).to(device)
 
             # Predict
-            all_pred_boxes, pred_classes, pred_sims, _ = model(image)
+            #all_pred_boxes, pred_classes, pred_sims, _ = model(image)
+            all_pred_boxes, pred_sims = model(image)
             losses = criterion(pred_sims.cuda(), labels.cuda(), all_pred_boxes.cuda(), boxes.cuda())
             loss = (
                 losses["loss_ce"]
@@ -101,7 +103,7 @@ if __name__ == "__main__":
             general_loss.update(losses)
 
         train_metrics = general_loss.get_values()
-        general_loss.reset()
+        general_loss.reset()'''
 
         # Eval loop
         model.eval()
@@ -115,9 +117,10 @@ if __name__ == "__main__":
                 boxes = coco_to_model_input(boxes, metadata).to(device)
 
                 # Get predictions and save output
-                pred_boxes, pred_classes, pred_class_sims, _ = model(image)
+                pred_boxes, pred_classes, pred_sims, _ = model(image)
+                #pred_boxes, pred_sims = model(image)
                 pred_boxes, pred_classes, scores = postprocess(
-                    pred_boxes, pred_class_sims
+                    pred_boxes, pred_sims
                 )
 
                 # Use only the top 200 boxes to stay consistent with benchmarking

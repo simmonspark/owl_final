@@ -61,7 +61,7 @@ class OwlViT(torch.nn.Module):
 
         self.queries = torch.nn.Parameter(query_bank)
 
-    # Copied from transformers.models.clip.modeling_owlvit.OwlViTForObjectDetection.box_predictor
+    # Copied from transformers.model.clip.modeling_owlvit.OwlViTForObjectDetection.box_predictor
     # Removed some comments and docstring to clear up clutter for now
     def box_predictor(
             self,
@@ -73,7 +73,7 @@ class OwlViT(torch.nn.Module):
         pred_boxes = self.sigmoid(pred_boxes)
         return center_to_corners_format(pred_boxes)
 
-    # Copied from transformers.models.clip.modeling_owlvit.OwlViTForObjectDetection.image_embedder
+    # Copied from transformers.model.clip.modeling_owlvit.OwlViTForObjectDetection.image_embedder
     # Removed some comments and docstring to clear up clutter for now
     def image_embedder(self, pixel_values):
         vision_outputs = self.backbone(pixel_values=pixel_values)
