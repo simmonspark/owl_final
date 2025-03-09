@@ -404,7 +404,7 @@ class OwlViTModel(nn.Module):
         self.visual_projection = nn.Linear(self.vision_embed_dim, self.projection_dim, bias=False)
         self.text_projection = nn.Linear(self.text_embed_dim, self.projection_dim, bias=False)
         self.logit_scale = nn.Parameter(torch.tensor(config.logit_scale_init_value))
-        self.load_state_dict(torch.load('/media/sien/media/code/owl_final/src/model/clip_model.pth'),strict=True)
+        #self.load_state_dict(torch.load('/media/sien/media/code/owl_final/src/model/clip_model.pth'),strict=True)
 
     def forward(self, input_ids=None, pixel_values=None, loss=False):
         # idx[0] : last_hidden_state : 1, 577, 768
@@ -468,28 +468,25 @@ class OwlViTClassPredictionHead(nn.Module):
 
         out_dim = config.text_config.hidden_size
         self.query_dim = config.vision_config.hidden_size
-
+        self.pool = torch.nn.MaxPool1d(kernel_size=1, stride=1)
         self.dense0 = nn.Linear(self.query_dim, out_dim)
         self.logit_shift = nn.Linear(self.query_dim, 1)
         self.logit_scale = nn.Linear(self.query_dim, 1)
         self.elu = nn.ELU()
 
     def forward(self, image_embeds, query_embeds):
-        # image_embeds : B, T, C | query_embeds : B, T, C | C~768
-        # image_class_embeds : B, T, C' | C'~512
         image_class_embeds = self.dense0(image_embeds)
-        image_class_embeds = image_class_embeds / (torch.linalg.norm(image_class_embeds, dim=-1, keepdim=True) + 1e-6)
-        query_embeds = query_embeds / (torch.linalg.norm(query_embeds, dim=-1, keepdim=True) + 1e-6)
-        # img2text
-        pred_logits = torch.einsum("...pd,...qd->...pq", image_class_embeds, query_embeds)
 
-        logit_shift = self.logit_shift(image_embeds)
-        logit_scale = self.logit_scale(image_embeds)
-        logit_scale = self.elu(logit_scale) + 1
-        pred_logits = (pred_logits + logit_shift) * logit_scale
-        # idx[0] : 1, 576,3
-        # idx[1] : 1, 576, 512
-        return (pred_logits, image_class_embeds)
+        # Normalize image and text features
+        image_class_embeds = image_class_embeds / (
+                torch.linalg.norm(image_class_embeds, dim=-1, keepdim=True) + 1e-6
+        )
+        query_embeds = (
+                query_embeds / torch.linalg.norm(query_embeds, dim=-1, keepdim=True) + 1e-6
+        )
+
+        pred_sims = image_class_embeds @ query_embeds.transpose(1, 2)
+        return (pred_sims, None)
 
 
 class OwlViTForObjectDetection(nn.Module):
@@ -502,7 +499,7 @@ class OwlViTForObjectDetection(nn.Module):
         self.owlvit = OwlViTModel(self.config)
         self.class_head = OwlViTClassPredictionHead(self.config)
         self.box_head = OwlViTBoxPredictionHead(self.config)
-
+        #self.owlvit.load_state_dict(torch.load('/media/sien/media/code/owl_final/src/model/clip_model.pth'))
         self.layer_norm = nn.LayerNorm(self.config.vision_config.hidden_size,
                                        eps=self.config.vision_config.layer_norm_eps)
         self.sigmoid = nn.Sigmoid()
@@ -514,7 +511,7 @@ class OwlViTForObjectDetection(nn.Module):
         _processor = AutoProcessor.from_pretrained("google/owlvit-base-patch32")
         hf_model = hf_model.from_pretrained("google/owlvit-base-patch32")
         state_hf = hf_model.state_dict()
-        self.load_state_dict(state_hf, strict=True)
+        self.load_state_dict(state_hf, strict=False)
         print('match')
         inputs = _processor(
             text=tmp,
@@ -528,7 +525,7 @@ class OwlViTForObjectDetection(nn.Module):
         for name, parameter in self.named_parameters():
             conditions = [
                 "layers.11" in name,
-                "box_head" in name,
+                "box" in name,
                 "post_layernorm" in name,
                 "class_head" in name,
                 "queries" in name,
@@ -537,6 +534,11 @@ class OwlViTForObjectDetection(nn.Module):
                 continue
 
             parameter.requires_grad = False
+        print("Trainable parameters:")
+        for name, parameter in self.named_parameters():
+            if parameter.requires_grad:
+                print(f"  {name}")
+        print()
 
     @staticmethod
     def normalize_grid_corner_coordinates(num_patches: int) -> torch.Tensor:
@@ -711,7 +713,7 @@ class OwlViTForObjectDetection(nn.Module):
             text_model_output=None,
             vision_model_output=None,
         )'''
-        return pred_boxes, pred_logits
+        return pred_boxes, None,pred_logits
 
 
 if __name__ == "__main__":

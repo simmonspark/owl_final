@@ -71,45 +71,44 @@ if __name__ == "__main__":
     model.train()
     classMAPs = {v: [] for v in list(labelmap.values())}
     for epoch in range(training_cfg["n_epochs"]):
-        '''if training_cfg["save_eval_images"]:
+        if training_cfg["save_eval_images"]:
             os.makedirs(f"debug/{epoch}", exist_ok=True)
 
-        # Train loop
-        losses = []
-        for i, (image, labels, boxes, metadata) in enumerate(
-            tqdm(train_dataloader, ncols=60)
-            # train_dataloader
-        ):
-            optimizer.zero_grad()
+            # Train loop
+            losses = []
+            for i, (image, labels, boxes, metadata) in enumerate(
+                    tqdm(train_dataloader, ncols=60)
+                    # train_dataloader
+            ):
+                optimizer.zero_grad()
 
-            # Prep inputs
-            image = image.to(device)
-            labels = labels.to(device)
-            boxes = coco_to_model_input(boxes, metadata).to(device)
+                # Prep inputs
+                image = image.to(device)
+                labels = labels.to(device)
+                boxes = coco_to_model_input(boxes, metadata).to(device)
 
-            # Predict
-            #all_pred_boxes, pred_classes, pred_sims, _ = model(image)
-            all_pred_boxes, pred_sims = model(image)
-            losses = criterion(pred_sims.cuda(), labels.cuda(), all_pred_boxes.cuda(), boxes.cuda())
-            loss = (
-                losses["loss_ce"]
-                + losses["loss_bg"]
-                + losses["loss_bbox"]
-                + losses["loss_giou"]
-            )
-            loss.backward()
-            optimizer.step()
+                # Predict
+                all_pred_boxes, pred_classes, pred_sims,_ = model(image)
+                losses = criterion(pred_sims.cuda(), labels.cuda(), all_pred_boxes.cuda(), boxes.cuda())
+                loss = (
+                        losses["loss_ce"]
+                        + losses["loss_bg"]
+                        + losses["loss_bbox"]
+                        + losses["loss_giou"]
+                )
+                loss.backward()
+                optimizer.step()
 
-            general_loss.update(losses)
+                general_loss.update(losses)
 
-        train_metrics = general_loss.get_values()
-        general_loss.reset()'''
+            train_metrics = general_loss.get_values()
+            general_loss.reset()
 
         # Eval loop
         model.eval()
         with torch.no_grad():
             for i, (image, labels, boxes, metadata) in enumerate(
-                tqdm(test_dataloader, ncols=60)
+                    tqdm(test_dataloader, ncols=60)
             ):
                 # Prep inputs
                 image = image.to(device)
@@ -117,10 +116,9 @@ if __name__ == "__main__":
                 boxes = coco_to_model_input(boxes, metadata).to(device)
 
                 # Get predictions and save output
-                pred_boxes, pred_classes, pred_sims, _ = model(image)
-                #pred_boxes, pred_sims = model(image)
+                pred_boxes, pred_classes, pred_class_sims,_= model(image)
                 pred_boxes, pred_classes, scores = postprocess(
-                    pred_boxes, pred_sims
+                    pred_boxes, pred_class_sims
                 )
 
                 # Use only the top 200 boxes to stay consistent with benchmarking
@@ -148,7 +146,11 @@ if __name__ == "__main__":
                         pred_boxes,
                         pred_classes_with_names,
                     )
-                    write_png(image_with_boxes, f"debug/{epoch}/{i}.jpg")
+                    save_dir = f"/media/sien/media/code/owl_final/debug/{epoch}"
+                    os.makedirs(save_dir, exist_ok=True)
+                    save_path = f"{save_dir}/{i}.png"
+                    write_png(image_with_boxes, save_path)
+        torch.save(model.state_dict(), f"./model.pth")
 
         print("Computing metrics...")
         val_metrics = metric.compute()

@@ -10,7 +10,7 @@ class PushPullLoss(torch.nn.Module):
     def __init__(self, n_classes, scales):
         super().__init__()
         self.matcher = HungarianMatcher(n_classes)
-        self.class_criterion = torch.nn.BCEWithLogitsLoss(reduction="none", weight=scales)# BCELoss  BCEWithLogitsLoss
+        self.class_criterion = torch.nn.BCELoss(reduction="none", weight=scales)# BCELoss  BCEWithLogitsLoss
         self.background_label = n_classes
 
     def class_loss(self, outputs, target_classes):
@@ -62,7 +62,7 @@ class PushPullLoss(torch.nn.Module):
         loss_giou = 1 - torch.diag(generalized_box_iou(src_boxes, target_boxes))
         loss_giou = loss_giou.sum() / num_boxes
 
-        return loss_bbox*1.5, loss_giou*1.5
+        return loss_bbox, loss_giou
 
     def forward(
             self,
